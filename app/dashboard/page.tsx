@@ -35,6 +35,7 @@ function starsFor(points: number) {
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState('');
   const [setupMode, setSetupMode] = useState(false);
   const [setupKids, setSetupKids] = useState<{ name: string; emoji: string }[]>([
     { name: '', emoji: '🦄' },
@@ -82,6 +83,7 @@ export default function DashboardPage() {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { router.push('/login'); return; }
+      setUserId(session.user.id);
       const list = await loadKids();
       if (list.length === 0) {
         setSetupMode(true);
@@ -102,6 +104,7 @@ export default function DashboardPage() {
     if (setupKids.length === 0 || setupKids.some(k => !k.name.trim())) { alert('Isi semua nama anak ya! 😊'); return; }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    setUserId(user.id);
     const rows = setupKids.map((k, i) => ({ user_id: user.id, slot: i + 1, name: k.name.trim(), emoji: k.emoji }));
     await supabase.from('kids').insert(rows);
     const list = await loadKids();
@@ -123,10 +126,9 @@ export default function DashboardPage() {
   };
 
   const addKid = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!userId) return;
     const maxSlot = kids.reduce((m, k) => Math.max(m, k.slot), 0);
-    await supabase.from('kids').insert({ user_id: user.id, slot: maxSlot + 1, name: 'Anak Baru', emoji: '🌟' });
+    await supabase.from('kids').insert({ user_id: userId, slot: maxSlot + 1, name: 'Anak Baru', emoji: '🌟' });
     const list = await loadKids();
     initEdit(list);
   };
@@ -165,13 +167,13 @@ export default function DashboardPage() {
     if (existing) {
       await supabase.from('checklists').update({ completed: !existing.completed }).eq('id', existing.id);
     } else {
-      await supabase.from('checklists').insert({ kid_name: key, task_id: taskId, day_of_week: day, completed: true, week_number: 1, week_start: todayISO() });
+      await supabase.from('checklists').insert({ user_id: userId, kid_name: key, task_id: taskId, day_of_week: day, completed: true, week_number: 1, week_start: todayISO() });
     }
     await loadData();
   };
 
   const doClaim = async (key: string, rw: Reward) => {
-    await supabase.from('claims').insert({ kid_name: key, reward_name: rw.name, points_cost: rw.min_points, claim_date: todayISO() });
+    await supabase.from('claims').insert({ user_id: userId, kid_name: key, reward_name: rw.name, points_cost: rw.min_points, claim_date: todayISO() });
     await loadData();
   };
 
@@ -180,7 +182,7 @@ export default function DashboardPage() {
       .reduce((s, c) => s + (tasks.find(t => t.id === c.task_id)?.points || 0), 0);
     if (!confirm(`Simpan ${cur} poin untuk ${nameOf(key)} dan mulai minggu baru?`)) return;
     const weekNo = history.filter(x => x.kid_name === key).length + 1;
-    await supabase.from('history').insert({ kid_name: key, week_number: weekNo, week_start: todayISO(), total_points: cur });
+    await supabase.from('history').insert({ user_id: userId, kid_name: key, week_number: weekNo, week_start: todayISO(), total_points: cur });
     await supabase.from('checklists').delete().eq('kid_name', key);
     await loadData();
     alert('✅ Minggu tersimpan! Siap untuk minggu baru!');
@@ -237,7 +239,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-cream pb-16">
-      <div className="print:hidden bg-gradient-to-br from-violet to-purple-400 text-white py-6 px-4 text-center relative overflow-hidden">
+      <div className="print:hidden bg-gradient-to-br from-violet to-purple-400 text-white pt-6 pb-16 px-4 text-center relative overflow-hidden">
         <h1 className="text-2xl md:text-3xl font-baloo font-bold relative z-10">🌟 Papan Tugas — {titleNames} 🌟</h1>
         <p className="text-sm opacity-90 mt-1 relative z-10">Beres-beres rumah, kumpulkan poin, tukar dengan reward seru!</p>
         <button onClick={logout} className="absolute top-4 right-4 bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg text-sm font-semibold">Logout</button>
