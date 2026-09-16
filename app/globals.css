@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@400;600;700;800&display=swap');
+
+body {
+  @apply bg-cream font-nunito text-ink;
+}
+
+.btn {
+  @apply font-baloo font-semibold text-sm border-none rounded-xl px-4 py-2.5 cursor-pointer transition-all duration-150;
+}
+
+.btn-primary {
+  @apply bg-violet text-white hover:bg-violet/90;
+}
+
+.btn-outline {
+  @apply bg-violet-soft text-violet hover:bg-violet-soft/80;
+}
+
+.btn-ghost {
+  @apply bg-sun-soft text-amber-800 hover:bg-sun-soft/80;
+}

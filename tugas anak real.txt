@@ -1,0 +1,34 @@
+tugas anak real
+supabase irgirenjana28
+GitHub berkahrenjanasinergi
+vercel irgirenjana28
+
+sb_publishable_2YMNv1y98yPfAC_Br7C6mw_iwBbnaGq
+https://txzwktdpgtrqbxlvsizz.supabase.co/rest/v1/
+
+papan-tugas/
+├── app/
+│   ├── login/
+│   │   └── page.tsx
+│   ├── dashboard/
+│   │   └── page.tsx
+│   ├── layout.tsx
+│   ├── page.tsx
+│   └── globals.css
+├── components/
+│   ├── Dashboard.tsx
+│   ├── Checklist.tsx
+│   ├── Rewards.tsx
+│   ├── History.tsx
+│   └── Certificate.tsx
+├── lib/
+│   ├── supabase.ts
+│   └── utils.ts
+├── types/
+│   └── index.ts
+├── supabase-schema.sql
+├── .env.local.example
+├── package.json
+├── tsconfig.json
+├── tailwind.config.js
+└── next.config.js
