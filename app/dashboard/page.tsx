@@ -12,7 +12,15 @@ interface ClaimRow { id: string; kid_name: string; reward_name: string; points_c
 interface Kid { id: string; slot: number; name: string; emoji: string }
 
 const DAYS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
-const EMOJI_CHOICES = ['🦄', '🚀', '', '', '🐼', '🦁', '', '', '🐰', '🧸', '', ''];
+const EMOJI_CHOICES = ['🦄', '🚀', '', '', '🐼', '🦁', '', '', '🐰', '', '', ''];
+const THEMES = [
+  { card: 'from-miqa to-pink-300', head: 'bg-miqa', text: 'text-miqa', tag: 'bg-miqa' },
+  { card: 'from-irgi to-blue-300', head: 'bg-irgi', text: 'text-irgi', tag: 'bg-irgi' },
+  { card: 'from-green to-emerald-300', head: 'bg-green', text: 'text-green', tag: 'bg-green' },
+  { card: 'from-sun to-amber-300', head: 'bg-sun', text: 'text-amber-600', tag: 'bg-sun' },
+  { card: 'from-violet to-purple-300', head: 'bg-violet', text: 'text-violet', tag: 'bg-violet' },
+];
+const themeOfSlot = (slot: number) => THEMES[(slot - 1) % THEMES.length];
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function formatDate(iso: string) {
@@ -28,20 +36,21 @@ function starsFor(points: number) {
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [setupMode, setSetupMode] = useState(false);
+  const [setupKids, setSetupKids] = useState<{ name: string; emoji: string }[]>([
+    { name: '', emoji: '🦄' },
+    { name: '', emoji: '🚀' },
+  ]);
   const [kids, setKids] = useState<Kid[]>([]);
-  const [setup1, setSetup1] = useState({ name: '', emoji: '🦄' });
-  const [setup2, setSetup2] = useState({ name: '', emoji: '🚀' });
-  const [edit1, setEdit1] = useState({ name: '', emoji: '🦄' });
-  const [edit2, setEdit2] = useState({ name: '', emoji: '🚀' });
+  const [editKids, setEditKids] = useState<{ id: string; slot: number; name: string; emoji: string }[]>([]);
   const [activeView, setActiveView] = useState('dashboard');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [checklists, setChecklists] = useState<ChecklistRow[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [claims, setClaims] = useState<ClaimRow[]>([]);
-  const [claimKid, setClaimKid] = useState('kid1');
+  const [claimKid, setClaimKid] = useState('');
   const [claimRewardId, setClaimRewardId] = useState('');
-  const [certKid, setCertKid] = useState('kid1');
+  const [certKid, setCertKid] = useState('');
   const supabase = createClientComponentClient();
   const router = useRouter();
 
@@ -67,6 +76,8 @@ export default function DashboardPage() {
     return list;
   };
 
+  const initEdit = (list: Kid[]) => setEditKids(list.map(k => ({ id: k.id, slot: k.slot, name: k.name, emoji: k.emoji })));
+
   useEffect(() => {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -77,10 +88,9 @@ export default function DashboardPage() {
         setLoading(false);
         return;
       }
-      const k1 = list.find(k => k.slot === 1);
-      const k2 = list.find(k => k.slot === 2);
-      if (k1) setEdit1({ name: k1.name, emoji: k1.emoji });
-      if (k2) setEdit2({ name: k2.name, emoji: k2.emoji });
+      initEdit(list);
+      setClaimKid(`kid${list[0].slot}`);
+      setCertKid(`kid${list[0].slot}`);
       await loadData();
       setLoading(false);
     };
@@ -89,37 +99,55 @@ export default function DashboardPage() {
   }, []);
 
   const saveSetup = async () => {
-    const n1 = setup1.name.trim();
-    const n2 = setup2.name.trim();
-    if (!n1 || !n2) { alert('Isi dulu nama kedua anak ya! 😊'); return; }
+    if (setupKids.length === 0 || setupKids.some(k => !k.name.trim())) { alert('Isi semua nama anak ya! 😊'); return; }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from('kids').insert([
-      { user_id: user.id, slot: 1, name: n1, emoji: setup1.emoji },
-      { user_id: user.id, slot: 2, name: n2, emoji: setup2.emoji },
-    ]);
+    const rows = setupKids.map((k, i) => ({ user_id: user.id, slot: i + 1, name: k.name.trim(), emoji: k.emoji }));
+    await supabase.from('kids').insert(rows);
     const list = await loadKids();
-    const k1 = list.find(k => k.slot === 1);
-    const k2 = list.find(k => k.slot === 2);
-    if (k1) setEdit1({ name: k1.name, emoji: k1.emoji });
-    if (k2) setEdit2({ name: k2.name, emoji: k2.emoji });
+    initEdit(list);
+    setClaimKid(`kid${list[0].slot}`);
+    setCertKid(`kid${list[0].slot}`);
     setSetupMode(false);
     await loadData();
   };
 
   const saveSettings = async () => {
-    const k1 = kids.find(k => k.slot === 1);
-    const k2 = kids.find(k => k.slot === 2);
-    if (!k1 || !k2) return;
-    if (!edit1.name.trim() || !edit2.name.trim()) { alert('Nama tidak boleh kosong ya! 😊'); return; }
-    await supabase.from('kids').update({ name: edit1.name.trim(), emoji: edit1.emoji }).eq('id', k1.id);
-    await supabase.from('kids').update({ name: edit2.name.trim(), emoji: edit2.emoji }).eq('id', k2.id);
-    await loadKids();
+    if (editKids.some(k => !k.name.trim())) { alert('Nama tidak boleh kosong ya! 😊'); return; }
+    for (const k of editKids) {
+      await supabase.from('kids').update({ name: k.name.trim(), emoji: k.emoji }).eq('id', k.id);
+    }
+    const list = await loadKids();
+    initEdit(list);
     alert('✅ Pengaturan tersimpan!');
   };
 
-  const kid1 = kids.find(k => k.slot === 1);
-  const kid2 = kids.find(k => k.slot === 2);
+  const addKid = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const maxSlot = kids.reduce((m, k) => Math.max(m, k.slot), 0);
+    await supabase.from('kids').insert({ user_id: user.id, slot: maxSlot + 1, name: 'Anak Baru', emoji: '🌟' });
+    const list = await loadKids();
+    initEdit(list);
+  };
+
+  const deleteKid = async (slot: number) => {
+    if (kids.length <= 1) { alert('Minimal harus ada 1 anak ya! 😊'); return; }
+    const kid = kids.find(k => k.slot === slot);
+    if (!kid) return;
+    if (!confirm(`Hapus ${kid.name} beserta semua poin & riwayatnya? Tidak bisa dibatalkan!`)) return;
+    const key = `kid${slot}`;
+    await supabase.from('checklists').delete().eq('kid_name', key);
+    await supabase.from('history').delete().eq('kid_name', key);
+    await supabase.from('claims').delete().eq('kid_name', key);
+    await supabase.from('kids').delete().eq('id', kid.id);
+    const list = await loadKids();
+    initEdit(list);
+    await loadData();
+    setActiveView('dashboard');
+  };
+
+  const kidKey = (k: Kid) => `kid${k.slot}`;
   const kidOfKey = (key: string) => kids.find(k => `kid${k.slot}` === key);
   const nameOf = (key: string) => kidOfKey(key)?.name || '-';
   const emojiOf = (key: string) => kidOfKey(key)?.emoji || '🌟';
@@ -131,8 +159,6 @@ export default function DashboardPage() {
     const clm = claims.filter(x => x.kid_name === key).reduce((s, x) => s + x.points_cost, 0);
     return cur + hist - clm;
   };
-  const p1 = pointsOf('kid1');
-  const p2 = pointsOf('kid2');
 
   const toggleChecklist = async (taskId: string, day: string, key: string) => {
     const existing = checklists.find(c => c.task_id === taskId && c.day_of_week === day && c.kid_name === key);
@@ -162,15 +188,22 @@ export default function DashboardPage() {
 
   const logout = async () => { await supabase.auth.signOut(); router.push('/login'); };
 
+  const ranked = kids.map(k => ({ k, pts: pointsOf(kidKey(k)) })).sort((a, b) => b.pts - a.pts);
+  const allZero = ranked.length === 0 || ranked.every(r => r.pts === 0);
+  const topTie = ranked.length > 1 && ranked[0].pts > 0 && ranked[0].pts === ranked[1].pts;
+
+  const weeks = Array.from(new Set(history.map(h => h.week_number))).sort((a, b) => a - b);
+
   const tabs = [
     { id: 'dashboard', label: '🌈 Dashboard' },
-    ...(kid1 ? [{ id: 'kid1', label: `${kid1.emoji} ${kid1.name}` }] : []),
-    ...(kid2 ? [{ id: 'kid2', label: `${kid2.emoji} ${kid2.name}` }] : []),
+    ...kids.map(k => ({ id: kidKey(k), label: `${k.emoji} ${k.name}` })),
     { id: 'rewards', label: '🎁 Reward' },
     { id: 'history', label: '📊 Rekap' },
     { id: 'certificate', label: '🏅 Piagam' },
     { id: 'settings', label: '⚙️ Pengaturan' },
   ];
+
+  const titleNames = kids.slice(0, 3).map(k => k.name).join(', ') + (kids.length > 3 ? ` +${kids.length - 3}` : '');
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center bg-cream"><div className="font-baloo text-xl text-violet">⏳ Memuat...</div></div>;
@@ -178,31 +211,25 @@ export default function DashboardPage() {
 
   if (setupMode) {
     return (
-      <div className="min-h-screen bg-cream flex items-center justify-center px-4">
+      <div className="min-h-screen bg-cream flex items-center justify-center px-4 py-10">
         <div className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full">
           <h1 className="font-baloo font-bold text-2xl text-violet text-center mb-1">👋 Selamat Datang!</h1>
-          <p className="text-center text-ink-soft text-sm mb-6">Sebelum mulai, tulis dulu nama dua anak hebat kita ya!</p>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-bold mb-1">Nama Anak Pertama</label>
-              <div className="flex gap-2">
-                <select value={setup1.emoji} onChange={e => setSetup1({ ...setup1, emoji: e.target.value })} className="px-3 py-3 border-2 border-line rounded-xl text-xl">
+          <p className="text-center text-ink-soft text-sm mb-6">Tulis nama anak-anak hebat di rumah kita (boleh sebanyak apa pun)!</p>
+          <div className="space-y-3">
+            {setupKids.map((k, i) => (
+              <div key={i} className="flex gap-2">
+                <select value={k.emoji} onChange={e => setSetupKids(setupKids.map((x, idx) => idx === i ? { ...x, emoji: e.target.value } : x))} className="px-3 py-3 border-2 border-line rounded-xl text-xl">
                   {EMOJI_CHOICES.map(e => <option key={e} value={e}>{e}</option>)}
                 </select>
-                <input value={setup1.name} onChange={e => setSetup1({ ...setup1, name: e.target.value })} placeholder="Contoh: Miqa" className="flex-1 px-4 py-3 border-2 border-line rounded-xl" />
+                <input value={k.name} onChange={e => setSetupKids(setupKids.map((x, idx) => idx === i ? { ...x, name: e.target.value } : x))} placeholder={`Nama anak ke-${i + 1}`} className="flex-1 px-4 py-3 border-2 border-line rounded-xl" />
+                {setupKids.length > 1 && (
+                  <button onClick={() => setSetupKids(setupKids.filter((_, idx) => idx !== i))} className="px-3 text-red-400 hover:text-red-600 font-bold">✕</button>
+                )}
               </div>
-            </div>
-            <div>
-              <label className="block text-sm font-bold mb-1">Nama Anak Kedua</label>
-              <div className="flex gap-2">
-                <select value={setup2.emoji} onChange={e => setSetup2({ ...setup2, emoji: e.target.value })} className="px-3 py-3 border-2 border-line rounded-xl text-xl">
-                  {EMOJI_CHOICES.map(e => <option key={e} value={e}>{e}</option>)}
-                </select>
-                <input value={setup2.name} onChange={e => setSetup2({ ...setup2, name: e.target.value })} placeholder="Contoh: Irgi" className="flex-1 px-4 py-3 border-2 border-line rounded-xl" />
-              </div>
-            </div>
-            <button onClick={saveSetup} className="w-full bg-violet hover:bg-violet/90 text-white font-baloo font-bold rounded-xl py-3">🚀 Mulai Petualangan!</button>
+            ))}
           </div>
+          <button onClick={() => setSetupKids([...setupKids, { name: '', emoji: '🌟' }])} className="mt-3 w-full bg-violet-soft text-violet font-baloo font-semibold rounded-xl py-2">➕ Tambah Anak</button>
+          <button onClick={saveSetup} className="mt-4 w-full bg-violet hover:bg-violet/90 text-white font-baloo font-bold rounded-xl py-3">🚀 Mulai Petualangan!</button>
         </div>
       </div>
     );
@@ -211,7 +238,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-cream pb-16">
       <div className="print:hidden bg-gradient-to-br from-violet to-purple-400 text-white py-6 px-4 text-center relative overflow-hidden">
-        <h1 className="text-2xl md:text-3xl font-baloo font-bold relative z-10">🌟 Papan Tugas — {kid1?.name || ''} & {kid2?.name || ''} 🌟</h1>
+        <h1 className="text-2xl md:text-3xl font-baloo font-bold relative z-10">🌟 Papan Tugas — {titleNames} 🌟</h1>
         <p className="text-sm opacity-90 mt-1 relative z-10">Beres-beres rumah, kumpulkan poin, tukar dengan reward seru!</p>
         <button onClick={logout} className="absolute top-4 right-4 bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg text-sm font-semibold">Logout</button>
       </div>
@@ -230,41 +257,41 @@ export default function DashboardPage() {
         {activeView === 'dashboard' && (
           <div className="space-y-4">
             <div className="grid md:grid-cols-2 gap-4">
-              <div className="bg-gradient-to-br from-miqa to-pink-300 rounded-2xl p-6 text-white">
-                <div className="font-baloo font-bold text-xl">{kid1?.emoji} {kid1?.name}</div>
-                <div className="font-baloo text-5xl font-bold">{p1}<span className="text-lg opacity-85 ml-2">poin</span></div>
-                <div className="mt-2 text-lg">{starsFor(p1)}</div>
-              </div>
-              <div className="bg-gradient-to-br from-irgi to-blue-300 rounded-2xl p-6 text-white">
-                <div className="font-baloo font-bold text-xl">{kid2?.emoji} {kid2?.name}</div>
-                <div className="font-baloo text-5xl font-bold">{p2}<span className="text-lg opacity-85 ml-2">poin</span></div>
-                <div className="mt-2 text-lg">{starsFor(p2)}</div>
-              </div>
+              {kids.map(k => {
+                const t = themeOfSlot(k.slot);
+                const pts = pointsOf(kidKey(k));
+                return (
+                  <div key={k.id} className={`bg-gradient-to-br ${t.card} rounded-2xl p-6 text-white`}>
+                    <div className="font-baloo font-bold text-xl">{k.emoji} {k.name}</div>
+                    <div className="font-baloo text-5xl font-bold">{pts}<span className="text-lg opacity-85 ml-2">poin</span></div>
+                    <div className="mt-2 text-lg">{starsFor(pts)}</div>
+                  </div>
+                );
+              })}
             </div>
             <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
               <h2 className="font-baloo font-bold text-lg mb-2">🏁 Papan Juara</h2>
-              {p1 === 0 && p2 === 0 ? <p className="text-ink-soft">Yuk mulai centang tugas hari ini! 🌟</p>
-                : p1 === p2 ? <p className="font-semibold">🤝 {kid1?.name} & {kid2?.name} seri! Sama-sama juara!</p>
-                : p1 > p2 ? <p className="font-semibold">{kid1?.emoji} {kid1?.name} unggul sementara — {kid2?.name}, ayo kejar! {kid2?.emoji}</p>
-                : <p className="font-semibold">{kid2?.emoji} {kid2?.name} unggul sementara — {kid1?.name}, semangat! {kid1?.emoji}</p>}
+              {allZero ? <p className="text-ink-soft">Yuk mulai centang tugas hari ini! 🌟</p>
+                : topTie ? <p className="font-semibold">🤝 {ranked[0].k.name} & {ranked[1].k.name} seri! Sama-sama juara!</p>
+                : <p className="font-semibold">{ranked[0].k.emoji} {ranked[0].k.name} unggul sementara — yang lain, ayo kejar! 💪</p>}
             </div>
           </div>
         )}
 
-        {(activeView === 'kid1' || activeView === 'kid2') && (() => {
+        {activeView.startsWith('kid') && (() => {
           const key = activeView;
           const kid = kidOfKey(key);
           if (!kid) return null;
-          const isOne = kid.slot === 1;
+          const t = themeOfSlot(kid.slot);
           const total = checklists.filter(c => c.kid_name === key && c.completed)
-            .reduce((s, c) => s + (tasks.find(t => t.id === c.task_id)?.points || 0), 0);
+            .reduce((s, c) => s + (tasks.find(t2 => t2.id === c.task_id)?.points || 0), 0);
           return (
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h2 className="font-baloo font-bold text-xl mb-4">{kid.emoji} Checklist {kid.name}</h2>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className={`${isOne ? 'bg-miqa' : 'bg-irgi'} text-white`}>
+                    <tr className={`${t.head} text-white`}>
                       <th className="p-3 text-left font-baloo">Tugas</th>
                       <th className="p-3 font-baloo">Poin</th>
                       {DAYS.map(d => <th key={d} className="p-3 font-baloo">{d.slice(0, 3)}</th>)}
@@ -312,9 +339,13 @@ export default function DashboardPage() {
                       <div className="font-baloo font-bold">{rw.name}</div>
                       <div className="text-sm text-ink-soft">Butuh {rw.min_points} poin</div>
                     </div>
-                    <div className="flex flex-col gap-1 items-end">
-                      <span className={`text-xs px-3 py-1 rounded-full font-semibold ${p1 >= rw.min_points ? 'bg-green-100 text-green' : 'bg-gray-100 text-gray-500'}`}>{kid1?.emoji} {p1 >= rw.min_points ? 'Tercapai' : 'Belum'}</span>
-                      <span className={`text-xs px-3 py-1 rounded-full font-semibold ${p2 >= rw.min_points ? 'bg-green-100 text-green' : 'bg-gray-100 text-gray-500'}`}>{kid2?.emoji} {p2 >= rw.min_points ? 'Tercapai' : 'Belum'}</span>
+                    <div className="flex flex-wrap gap-1 justify-end max-w-[50%]">
+                      {kids.map(k => {
+                        const ok = pointsOf(kidKey(k)) >= rw.min_points;
+                        return (
+                          <span key={k.id} title={`${k.name}: ${ok ? 'Tercapai' : 'Belum'}`} className={`text-xs px-2 py-1 rounded-full font-semibold ${ok ? 'bg-green-100 text-green' : 'bg-gray-100 text-gray-500'}`}>{k.emoji} {ok ? '✓' : '✗'}</span>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -324,8 +355,7 @@ export default function DashboardPage() {
               <h2 className="font-baloo font-bold text-xl mb-4">🎁 Klaim Reward</h2>
               <div className="grid md:grid-cols-3 gap-3">
                 <select value={claimKid} onChange={e => setClaimKid(e.target.value)} className="px-4 py-3 border-2 border-line rounded-xl">
-                  <option value="kid1">{kid1?.emoji} {kid1?.name}</option>
-                  <option value="kid2">{kid2?.emoji} {kid2?.name}</option>
+                  {kids.map(k => <option key={k.id} value={kidKey(k)}>{k.emoji} {k.name}</option>)}
                 </select>
                 <select value={claimRewardId} onChange={e => setClaimRewardId(e.target.value)} className="px-4 py-3 border-2 border-line rounded-xl">
                   <option value="">Pilih reward...</option>
@@ -344,12 +374,16 @@ export default function DashboardPage() {
               <h2 className="font-baloo font-bold text-xl mb-4">📜 Riwayat Klaim</h2>
               {claims.length === 0 ? <p className="text-center text-ink-soft py-4">Belum ada reward yang diklaim.</p> : (
                 <div className="space-y-2">
-                  {claims.map(cl => (
-                    <div key={cl.id} className="flex justify-between items-center p-3 border-b border-line text-sm">
-                      <span><span className={`text-xs px-3 py-1 rounded-full font-bold text-white mr-2 ${cl.kid_name === 'kid1' ? 'bg-miqa' : 'bg-irgi'}`}>{emojiOf(cl.kid_name)} {nameOf(cl.kid_name)}</span>{cl.reward_name}</span>
-                      <span className="text-ink-soft">{formatDate(cl.claim_date)} · -{cl.points_cost} poin</span>
-                    </div>
-                  ))}
+                  {claims.map(cl => {
+                    const k = kidOfKey(cl.kid_name);
+                    const t = k ? themeOfSlot(k.slot) : THEMES[0];
+                    return (
+                      <div key={cl.id} className="flex justify-between items-center p-3 border-b border-line text-sm">
+                        <span><span className={`text-xs px-3 py-1 rounded-full font-bold text-white mr-2 ${t.tag}`}>{emojiOf(cl.kid_name)} {nameOf(cl.kid_name)}</span>{cl.reward_name}</span>
+                        <span className="text-ink-soft">{formatDate(cl.claim_date)} · -{cl.points_cost} poin</span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -360,51 +394,74 @@ export default function DashboardPage() {
           <div className="space-y-4">
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h2 className="font-baloo font-bold text-xl mb-4">📊 Rekap Poin Mingguan</h2>
-              {history.length === 0 ? <p className="text-center text-ink-soft py-6">Belum ada minggu yang tersimpan.</p> : (
+              {weeks.length === 0 ? <p className="text-center text-ink-soft py-6">Belum ada minggu yang tersimpan.</p> : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead><tr className="bg-violet text-white">
-                      <th className="p-3 font-baloo">Minggu</th><th className="p-3 font-baloo">Tanggal</th><th className="p-3 font-baloo">{kid1?.emoji} {kid1?.name}</th><th className="p-3 font-baloo">{kid2?.emoji} {kid2?.name}</th>
+                      <th className="p-3 font-baloo">Minggu</th>
+                      <th className="p-3 font-baloo">Tanggal</th>
+                      {kids.map(k => <th key={k.id} className="p-3 font-baloo">{k.emoji} {k.name}</th>)}
+                      <th className="p-3 font-baloo">Juara</th>
                     </tr></thead>
                     <tbody>
-                      {history.map(h => (
-                        <tr key={h.id} className="border-b border-line">
-                          <td className="p-3 text-center font-bold">{h.week_number}</td>
-                          <td className="p-3 text-center">{formatDate(h.week_start)}</td>
-                          <td className="p-3 text-center">{h.kid_name === 'kid1' ? h.total_points : '-'}</td>
-                          <td className="p-3 text-center">{h.kid_name === 'kid2' ? h.total_points : '-'}</td>
-                        </tr>
-                      ))}
+                      {weeks.map(w => {
+                        const rows = history.filter(h => h.week_number === w);
+                        const date = rows[0]?.week_start || '';
+                        const withPoints = kids.map(k => ({ k, pts: rows.find(r => r.kid_name === kidKey(k))?.total_points })).filter(x => x.pts !== undefined) as { k: Kid; pts: number }[];
+                        let juara = '-';
+                        if (withPoints.length > 0) {
+                          const max = Math.max(...withPoints.map(x => x.pts));
+                          const winners = withPoints.filter(x => x.pts === max);
+                          juara = winners.length > 1 ? '🤝 Seri' : `${winners[0].k.emoji} ${winners[0].k.name}`;
+                        }
+                        return (
+                          <tr key={w} className="border-b border-line">
+                            <td className="p-3 text-center font-bold">{w}</td>
+                            <td className="p-3 text-center">{formatDate(date)}</td>
+                            {kids.map(k => {
+                              const p = rows.find(r => r.kid_name === kidKey(k))?.total_points;
+                              return <td key={k.id} className="p-3 text-center">{p !== undefined ? p : '-'}</td>;
+                            })}
+                            <td className="p-3 text-center font-bold">{juara}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               )}
             </div>
             <div className="grid md:grid-cols-2 gap-4">
-              <button onClick={() => finishWeek('kid1')} className="bg-gradient-to-br from-miqa to-pink-300 text-white rounded-2xl p-6 shadow-lg font-baloo font-bold text-lg">{kid1?.emoji} Simpan Minggu {kid1?.name}</button>
-              <button onClick={() => finishWeek('kid2')} className="bg-gradient-to-br from-irgi to-blue-300 text-white rounded-2xl p-6 shadow-lg font-baloo font-bold text-lg">{kid2?.emoji} Simpan Minggu {kid2?.name}</button>
+              {kids.map(k => {
+                const t = themeOfSlot(k.slot);
+                return (
+                  <button key={k.id} onClick={() => finishWeek(kidKey(k))} className={`bg-gradient-to-br ${t.card} text-white rounded-2xl p-6 shadow-lg font-baloo font-bold text-lg`}>{k.emoji} Simpan Minggu {k.name}</button>
+                );
+              })}
             </div>
           </div>
         )}
 
         {activeView === 'certificate' && (() => {
-          const pts = pointsOf(certKid);
-          const name = nameOf(certKid);
-          const emoji = emojiOf(certKid);
+          const key = certKid || (kids[0] ? kidKey(kids[0]) : '');
+          const pts = pointsOf(key);
+          const name = nameOf(key);
+          const emoji = emojiOf(key);
+          const k = kidOfKey(key);
+          const t = k ? themeOfSlot(k.slot) : THEMES[0];
           const topReward = rewards.filter(r => pts >= r.min_points).sort((a, b) => b.min_points - a.min_points)[0];
           return (
             <div className="bg-gradient-to-b from-yellow-50 to-cream border-8 border-sun rounded-3xl p-8 md:p-10 text-center shadow-2xl">
               <div className="print:hidden mb-4 flex justify-center gap-3">
-                <select value={certKid} onChange={e => setCertKid(e.target.value)} className="px-4 py-2 border-2 border-line rounded-xl">
-                  <option value="kid1">{kid1?.emoji} {kid1?.name}</option>
-                  <option value="kid2">{kid2?.emoji} {kid2?.name}</option>
+                <select value={key} onChange={e => setCertKid(e.target.value)} className="px-4 py-2 border-2 border-line rounded-xl">
+                  {kids.map(kk => <option key={kk.id} value={kidKey(kk)}>{kk.emoji} {kk.name}</option>)}
                 </select>
                 <button onClick={() => window.print()} className="bg-violet text-white font-baloo font-semibold rounded-xl px-4 py-2">🖨️ Cetak Piagam</button>
               </div>
               <h2 className="text-sm tracking-[4px] text-violet font-bold">PIAGAM PENGHARGAAN</h2>
               <h1 className="font-baloo text-3xl md:text-4xl my-3">🏆 Sertifikat Anak Hebat 🏆</h1>
               <p className="text-ink-soft text-sm">Dengan bangga diberikan kepada:</p>
-              <div className={`font-baloo text-4xl md:text-5xl my-5 ${certKid === 'kid1' ? 'text-miqa' : 'text-irgi'}`}>{emoji} {name}</div>
+              <div className={`font-baloo text-4xl md:text-5xl my-5 ${t.text}`}>{emoji} {name}</div>
               <p className="max-w-md mx-auto text-sm md:text-base leading-relaxed mb-6">Atas semangat, tanggung jawab, dan kerja keras menyelesaikan tugas rumah dengan penuh senyum! 🌟</p>
               <p className="font-baloo font-bold">🏆 Total Poin Diraih: <span className="text-violet">{pts}</span></p>
               <p className="font-baloo font-bold">🎁 Reward Tertinggi: <span className="text-violet">{topReward ? `${topReward.icon} ${topReward.name}` : 'Belum ada, semangat terus!'}</span></p>
@@ -419,29 +476,27 @@ export default function DashboardPage() {
 
         {activeView === 'settings' && (
           <div className="bg-white rounded-2xl shadow-lg p-6">
-            <h2 className="font-baloo font-bold text-xl mb-4">⚙️ Pengaturan Nama Anak</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-bold mb-1">Anak Pertama</label>
-                <div className="flex gap-2">
-                  <select value={edit1.emoji} onChange={e => setEdit1({ ...edit1, emoji: e.target.value })} className="px-3 py-3 border-2 border-line rounded-xl text-xl">
-                    {EMOJI_CHOICES.map(e => <option key={e} value={e}>{e}</option>)}
-                  </select>
-                  <input value={edit1.name} onChange={e => setEdit1({ ...edit1, name: e.target.value })} className="flex-1 px-4 py-3 border-2 border-line rounded-xl" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-bold mb-1">Anak Kedua</label>
-                <div className="flex gap-2">
-                  <select value={edit2.emoji} onChange={e => setEdit2({ ...edit2, emoji: e.target.value })} className="px-3 py-3 border-2 border-line rounded-xl text-xl">
-                    {EMOJI_CHOICES.map(e => <option key={e} value={e}>{e}</option>)}
-                  </select>
-                  <input value={edit2.name} onChange={e => setEdit2({ ...edit2, name: e.target.value })} className="flex-1 px-4 py-3 border-2 border-line rounded-xl" />
-                </div>
-              </div>
+            <h2 className="font-baloo font-bold text-xl mb-4">⚙️ Pengaturan Anak</h2>
+            <div className="space-y-3">
+              {editKids.map((k, i) => {
+                const t = themeOfSlot(k.slot);
+                return (
+                  <div key={k.id} className="flex gap-2 items-center">
+                    <span className={`w-8 h-8 rounded-full ${t.tag} text-white flex items-center justify-center font-bold text-sm`}>{i + 1}</span>
+                    <select value={k.emoji} onChange={e => setEditKids(editKids.map(x => x.id === k.id ? { ...x, emoji: e.target.value } : x))} className="px-3 py-3 border-2 border-line rounded-xl text-xl">
+                      {EMOJI_CHOICES.map(e => <option key={e} value={e}>{e}</option>)}
+                    </select>
+                    <input value={k.name} onChange={e => setEditKids(editKids.map(x => x.id === k.id ? { ...x, name: e.target.value } : x))} className="flex-1 px-4 py-3 border-2 border-line rounded-xl" />
+                    <button onClick={() => deleteKid(k.slot)} title="Hapus anak" className="px-3 py-3 text-red-400 hover:text-red-600 font-bold">🗑️</button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap gap-3 mt-4">
+              <button onClick={addKid} className="bg-violet-soft text-violet font-baloo font-semibold rounded-xl px-5 py-3">➕ Tambah Anak</button>
               <button onClick={saveSettings} className="bg-violet hover:bg-violet/90 text-white font-baloo font-semibold rounded-xl px-6 py-3">💾 Simpan Perubahan</button>
             </div>
-            <p className="text-xs text-ink-soft mt-4">💡 Mengganti nama tidak menghapus poin & riwayat. Semua data tetap aman milik anak yang sama.</p>
+            <p className="text-xs text-ink-soft mt-4">💡 Ganti nama tidak menghapus poin & riwayat. Hapus anak akan menghapus semua poin & riwayatnya (hati-hati!).</p>
           </div>
         )}
 
