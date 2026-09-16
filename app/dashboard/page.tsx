@@ -9,10 +9,10 @@ interface Reward { id: string; icon: string; name: string; min_points: number }
 interface ChecklistRow { id: string; kid_name: string; task_id: string; day_of_week: string; completed: boolean; week_number: number; week_start: string }
 interface HistoryRow { id: string; kid_name: string; week_number: number; week_start: string; total_points: number }
 interface ClaimRow { id: string; kid_name: string; reward_name: string; points_cost: number; claim_date: string }
-interface Kid { id: string; slot: number; name: string; emoji: string }
+interface Kid { id: string; slot: number; name: string; emoji: string; week_num?: number; week_start?: string }
 
 const DAYS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
-const EMOJI_CHOICES = ['🦄', '🚀', '', '', '🐼', '🦁', '', '', '🐰', '', '', ''];
+const EMOJI_CHOICES = ['🦄', '', '', '', '🐼', '🦁', '', '', '🐰', '', '', ''];
 const THEMES = [
   { card: 'from-miqa to-pink-300', head: 'bg-miqa', text: 'text-miqa', tag: 'bg-miqa' },
   { card: 'from-irgi to-blue-300', head: 'bg-irgi', text: 'text-irgi', tag: 'bg-irgi' },
@@ -25,7 +25,7 @@ const themeOfSlot = (slot: number) => THEMES[(slot - 1) % THEMES.length];
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function formatDate(iso: string) {
   if (!iso) return '-';
-  const d = new Date(iso);
+  const d = new Date(iso + 'T00:00:00');
   return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 function starsFor(points: number) {
@@ -105,7 +105,7 @@ export default function DashboardPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     setUserId(user.id);
-    const rows = setupKids.map((k, i) => ({ user_id: user.id, slot: i + 1, name: k.name.trim(), emoji: k.emoji }));
+    const rows = setupKids.map((k, i) => ({ user_id: user.id, slot: i + 1, name: k.name.trim(), emoji: k.emoji, week_num: 1, week_start: todayISO() }));
     await supabase.from('kids').insert(rows);
     const list = await loadKids();
     initEdit(list);
@@ -128,7 +128,7 @@ export default function DashboardPage() {
   const addKid = async () => {
     if (!userId) return;
     const maxSlot = kids.reduce((m, k) => Math.max(m, k.slot), 0);
-    await supabase.from('kids').insert({ user_id: userId, slot: maxSlot + 1, name: 'Anak Baru', emoji: '🌟' });
+    await supabase.from('kids').insert({ user_id: userId, slot: maxSlot + 1, name: 'Anak Baru', emoji: '🌟', week_num: 1, week_start: todayISO() });
     const list = await loadKids();
     initEdit(list);
   };
@@ -149,17 +149,50 @@ export default function DashboardPage() {
     setActiveView('dashboard');
   };
 
+  const updateTask = async (id: string, patch: Partial<Task>) => {
+    setTasks(ts => ts.map(t => t.id === id ? { ...t, ...patch } : t));
+    await supabase.from('tasks').update(patch).eq('id', id);
+  };
+  const addTask = async () => {
+    if (!userId) return;
+    const { data } = await supabase.from('tasks').insert({ user_id: userId, icon: '🆕', name: 'Tugas Baru', points: 10 }).select();
+    if (data) setTasks(ts => [...ts, ...(data as Task[])]);
+  };
+  const deleteTask = async (id: string) => {
+    const t = tasks.find(x => x.id === id);
+    if (!confirm(`Hapus tugas "${t?.name}"? Centangannya ikut terhapus.`)) return;
+    setTasks(ts => ts.filter(x => x.id !== id));
+    setChecklists(cs => cs.filter(c => c.task_id !== id));
+    await supabase.from('tasks').delete().eq('id', id);
+  };
+  const updateReward = async (id: string, patch: Partial<Reward>) => {
+    setRewards(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+    await supabase.from('rewards').update(patch).eq('id', id);
+  };
+  const addReward = async () => {
+    if (!userId) return;
+    const { data } = await supabase.from('rewards').insert({ user_id: userId, icon: '🎁', name: 'Reward Baru', min_points: 100 }).select();
+    if (data) setRewards(rs => [...rs, ...(data as Reward[])]);
+  };
+  const deleteReward = async (id: string) => {
+    const r = rewards.find(x => x.id === id);
+    if (!confirm(`Hapus reward "${r?.name}"?`)) return;
+    setRewards(rs => rs.filter(x => x.id !== id));
+    await supabase.from('rewards').delete().eq('id', id);
+  };
+
   const kidKey = (k: Kid) => `kid${k.slot}`;
   const kidOfKey = (key: string) => kids.find(k => `kid${k.slot}` === key);
   const nameOf = (key: string) => kidOfKey(key)?.name || '-';
   const emojiOf = (key: string) => kidOfKey(key)?.emoji || '🌟';
 
+  const currentWeekOf = (key: string) => checklists.filter(c => c.kid_name === key && c.completed)
+    .reduce((s, c) => s + (tasks.find(t => t.id === c.task_id)?.points || 0), 0);
+
   const pointsOf = (key: string) => {
-    const cur = checklists.filter(c => c.kid_name === key && c.completed)
-      .reduce((s, c) => s + (tasks.find(t => t.id === c.task_id)?.points || 0), 0);
     const hist = history.filter(x => x.kid_name === key).reduce((s, x) => s + x.total_points, 0);
     const clm = claims.filter(x => x.kid_name === key).reduce((s, x) => s + x.points_cost, 0);
-    return cur + hist - clm;
+    return currentWeekOf(key) + hist - clm;
   };
 
   const toggleChecklist = async (taskId: string, day: string, key: string) => {
@@ -178,17 +211,29 @@ export default function DashboardPage() {
   };
 
   const finishWeek = async (key: string) => {
-    const cur = checklists.filter(c => c.kid_name === key && c.completed)
-      .reduce((s, c) => s + (tasks.find(t => t.id === c.task_id)?.points || 0), 0);
-    if (!confirm(`Simpan ${cur} poin untuk ${nameOf(key)} dan mulai minggu baru?`)) return;
-    const weekNo = history.filter(x => x.kid_name === key).length + 1;
-    await supabase.from('history').insert({ user_id: userId, kid_name: key, week_number: weekNo, week_start: todayISO(), total_points: cur });
+    const kid = kidOfKey(key);
+    if (!kid) return;
+    const cur = currentWeekOf(key);
+    if (!confirm(`Simpan ${cur} poin untuk ${kid.name} (Minggu ke-${kid.week_num || 1}) dan mulai minggu baru?`)) return;
+    await supabase.from('history').insert({ user_id: userId, kid_name: key, week_number: kid.week_num || 1, week_start: kid.week_start || todayISO(), total_points: cur });
     await supabase.from('checklists').delete().eq('kid_name', key);
+    const d = new Date((kid.week_start || todayISO()) + 'T00:00:00');
+    d.setDate(d.getDate() + 7);
+    await supabase.from('kids').update({ week_num: (kid.week_num || 1) + 1, week_start: d.toISOString().slice(0, 10) }).eq('id', kid.id);
+    const list = await loadKids();
+    initEdit(list);
     await loadData();
     alert('✅ Minggu tersimpan! Siap untuk minggu baru!');
   };
 
   const logout = async () => { await supabase.auth.signOut(); router.push('/login'); };
+
+  const sortedRewards = [...rewards].sort((a, b) => a.min_points - b.min_points);
+  const maxReward = sortedRewards.length ? sortedRewards[sortedRewards.length - 1].min_points : 100;
+  const nextRewardText = (pts: number) => {
+    const next = sortedRewards.find(r => r.min_points > pts);
+    return next ? `🎯 ${next.min_points - pts} poin lagi menuju ${next.icon} ${next.name}` : '🎉 Semua level reward tercapai!';
+  };
 
   const ranked = kids.map(k => ({ k, pts: pointsOf(kidKey(k)) })).sort((a, b) => b.pts - a.pts);
   const allZero = ranked.length === 0 || ranked.every(r => r.pts === 0);
@@ -267,6 +312,20 @@ export default function DashboardPage() {
                     <div className="font-baloo font-bold text-xl">{k.emoji} {k.name}</div>
                     <div className="font-baloo text-5xl font-bold">{pts}<span className="text-lg opacity-85 ml-2">poin</span></div>
                     <div className="mt-2 text-lg">{starsFor(pts)}</div>
+                    <div className="relative h-2.5 bg-white/35 rounded-full mt-6 mb-5">
+                      <div className="absolute left-0 top-0 h-full bg-white rounded-full transition-all" style={{ width: `${Math.min(100, (pts / maxReward) * 100)}%` }}></div>
+                      {sortedRewards.map(r => {
+                        const done = pts >= r.min_points;
+                        return (
+                          <div key={r.id} title={`${r.name} (${r.min_points} poin)`}
+                            style={{ left: `${Math.max(3, Math.min(97, (r.min_points / maxReward) * 100))}%` }}
+                            className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center text-sm border-2 border-white/50 ${done ? 'bg-white' : 'bg-white/35 grayscale brightness-150'}`}>
+                            {r.icon}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-sm opacity-95">{nextRewardText(pts)}</p>
                   </div>
                 );
               })}
@@ -277,6 +336,14 @@ export default function DashboardPage() {
                 : topTie ? <p className="font-semibold">🤝 {ranked[0].k.name} & {ranked[1].k.name} seri! Sama-sama juara!</p>
                 : <p className="font-semibold">{ranked[0].k.emoji} {ranked[0].k.name} unggul sementara — yang lain, ayo kejar! 💪</p>}
             </div>
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <h2 className="font-baloo font-bold text-lg mb-3">📌 Minggu Berjalan</h2>
+              <div className="space-y-2 text-sm leading-relaxed">
+                {kids.map(k => (
+                  <p key={k.id}>{k.emoji} {k.name} — Minggu ke-{k.week_num || 1} (mulai {formatDate(k.week_start || todayISO())}), poin berjalan: <b>{currentWeekOf(kidKey(k))}</b></p>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -285,8 +352,7 @@ export default function DashboardPage() {
           const kid = kidOfKey(key);
           if (!kid) return null;
           const t = themeOfSlot(kid.slot);
-          const total = checklists.filter(c => c.kid_name === key && c.completed)
-            .reduce((s, c) => s + (tasks.find(t2 => t2.id === c.task_id)?.points || 0), 0);
+          const total = currentWeekOf(key);
           return (
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h2 className="font-baloo font-bold text-xl mb-4">{kid.emoji} Checklist {kid.name}</h2>
@@ -334,7 +400,7 @@ export default function DashboardPage() {
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h2 className="font-baloo font-bold text-xl mb-4">🏆 Daftar Reward</h2>
               <div className="space-y-3">
-                {rewards.map(rw => (
+                {sortedRewards.map(rw => (
                   <div key={rw.id} className="flex items-center gap-3 p-4 bg-cream rounded-xl border border-line">
                     <div className="text-3xl">{rw.icon}</div>
                     <div className="flex-1">
@@ -361,7 +427,7 @@ export default function DashboardPage() {
                 </select>
                 <select value={claimRewardId} onChange={e => setClaimRewardId(e.target.value)} className="px-4 py-3 border-2 border-line rounded-xl">
                   <option value="">Pilih reward...</option>
-                  {rewards.map(rw => <option key={rw.id} value={rw.id}>{rw.icon} {rw.name} ({rw.min_points} poin)</option>)}
+                  {sortedRewards.map(rw => <option key={rw.id} value={rw.id}>{rw.icon} {rw.name} ({rw.min_points} poin)</option>)}
                 </select>
                 <button onClick={() => {
                   const rw = rewards.find(x => x.id === claimRewardId);
@@ -451,7 +517,7 @@ export default function DashboardPage() {
           const emoji = emojiOf(key);
           const k = kidOfKey(key);
           const t = k ? themeOfSlot(k.slot) : THEMES[0];
-          const topReward = rewards.filter(r => pts >= r.min_points).sort((a, b) => b.min_points - a.min_points)[0];
+          const topReward = sortedRewards.filter(r => pts >= r.min_points).sort((a, b) => b.min_points - a.min_points)[0];
           return (
             <div className="bg-gradient-to-b from-yellow-50 to-cream border-8 border-sun rounded-3xl p-8 md:p-10 text-center shadow-2xl">
               <div className="print:hidden mb-4 flex justify-center gap-3">
@@ -477,28 +543,62 @@ export default function DashboardPage() {
         })()}
 
         {activeView === 'settings' && (
-          <div className="bg-white rounded-2xl shadow-lg p-6">
-            <h2 className="font-baloo font-bold text-xl mb-4">⚙️ Pengaturan Anak</h2>
-            <div className="space-y-3">
-              {editKids.map((k, i) => {
-                const t = themeOfSlot(k.slot);
-                return (
-                  <div key={k.id} className="flex gap-2 items-center">
-                    <span className={`w-8 h-8 rounded-full ${t.tag} text-white flex items-center justify-center font-bold text-sm`}>{i + 1}</span>
-                    <select value={k.emoji} onChange={e => setEditKids(editKids.map(x => x.id === k.id ? { ...x, emoji: e.target.value } : x))} className="px-3 py-3 border-2 border-line rounded-xl text-xl">
-                      {EMOJI_CHOICES.map(e => <option key={e} value={e}>{e}</option>)}
-                    </select>
-                    <input value={k.name} onChange={e => setEditKids(editKids.map(x => x.id === k.id ? { ...x, name: e.target.value } : x))} className="flex-1 px-4 py-3 border-2 border-line rounded-xl" />
-                    <button onClick={() => deleteKid(k.slot)} title="Hapus anak" className="px-3 py-3 text-red-400 hover:text-red-600 font-bold">🗑️</button>
-                  </div>
-                );
-              })}
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <h2 className="font-baloo font-bold text-xl mb-4">⚙️ Pengaturan Anak</h2>
+              <div className="space-y-3">
+                {editKids.map((k, i) => {
+                  const t = themeOfSlot(k.slot);
+                  return (
+                    <div key={k.id} className="flex gap-2 items-center">
+                      <span className={`w-8 h-8 rounded-full ${t.tag} text-white flex items-center justify-center font-bold text-sm`}>{i + 1}</span>
+                      <select value={k.emoji} onChange={e => setEditKids(editKids.map(x => x.id === k.id ? { ...x, emoji: e.target.value } : x))} className="px-3 py-3 border-2 border-line rounded-xl text-xl">
+                        {EMOJI_CHOICES.map(e => <option key={e} value={e}>{e}</option>)}
+                      </select>
+                      <input value={k.name} onChange={e => setEditKids(editKids.map(x => x.id === k.id ? { ...x, name: e.target.value } : x))} className="flex-1 px-4 py-3 border-2 border-line rounded-xl" />
+                      <button onClick={() => deleteKid(k.slot)} title="Hapus anak" className="px-3 py-3 text-red-400 hover:text-red-600 font-bold">🗑️</button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap gap-3 mt-4">
+                <button onClick={addKid} className="bg-violet-soft text-violet font-baloo font-semibold rounded-xl px-5 py-3">➕ Tambah Anak</button>
+                <button onClick={saveSettings} className="bg-violet hover:bg-violet/90 text-white font-baloo font-semibold rounded-xl px-6 py-3">💾 Simpan Perubahan</button>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-3 mt-4">
-              <button onClick={addKid} className="bg-violet-soft text-violet font-baloo font-semibold rounded-xl px-5 py-3">➕ Tambah Anak</button>
-              <button onClick={saveSettings} className="bg-violet hover:bg-violet/90 text-white font-baloo font-semibold rounded-xl px-6 py-3">💾 Simpan Perubahan</button>
+
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <h2 className="font-baloo font-bold text-xl mb-4">🛠️ Pengaturan Tugas & Reward</h2>
+              <details className="mb-4">
+                <summary className="cursor-pointer font-baloo font-semibold">📋 Daftar Tugas & Nilai Poin</summary>
+                <div className="mt-3 space-y-2">
+                  {tasks.map(t => (
+                    <div key={t.id} className="flex gap-2 items-center">
+                      <input defaultValue={t.icon} onBlur={e => updateTask(t.id, { icon: e.target.value })} className="w-14 px-2 py-2 border-2 border-line rounded-xl text-center" />
+                      <input defaultValue={t.name} onBlur={e => updateTask(t.id, { name: e.target.value })} className="flex-1 px-3 py-2 border-2 border-line rounded-xl" />
+                      <input defaultValue={t.points} type="number" onBlur={e => updateTask(t.id, { points: Number(e.target.value) || 0 })} className="w-20 px-2 py-2 border-2 border-line rounded-xl" />
+                      <button onClick={() => deleteTask(t.id)} title="Hapus tugas" className="px-2 text-red-400 hover:text-red-600 font-bold">🗑️</button>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={addTask} className="mt-3 bg-violet-soft text-violet font-baloo font-semibold rounded-xl px-4 py-2">➕ Tambah Tugas</button>
+              </details>
+              <details>
+                <summary className="cursor-pointer font-baloo font-semibold">🏆 Daftar Reward</summary>
+                <div className="mt-3 space-y-2">
+                  {sortedRewards.map(r => (
+                    <div key={r.id} className="flex gap-2 items-center">
+                      <input defaultValue={r.icon} onBlur={e => updateReward(r.id, { icon: e.target.value })} className="w-14 px-2 py-2 border-2 border-line rounded-xl text-center" />
+                      <input defaultValue={r.name} onBlur={e => updateReward(r.id, { name: e.target.value })} className="flex-1 px-3 py-2 border-2 border-line rounded-xl" />
+                      <input defaultValue={r.min_points} type="number" onBlur={e => updateReward(r.id, { min_points: Number(e.target.value) || 0 })} className="w-24 px-2 py-2 border-2 border-line rounded-xl" />
+                      <button onClick={() => deleteReward(r.id)} title="Hapus reward" className="px-2 text-red-400 hover:text-red-600 font-bold">🗑️</button>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={addReward} className="mt-3 bg-violet-soft text-violet font-baloo font-semibold rounded-xl px-4 py-2">➕ Tambah Reward</button>
+              </details>
+              <p className="text-xs text-ink-soft mt-4">💡 Perubahan tersimpan otomatis saat kolom selesai diketik (klik di luar kolom).</p>
             </div>
-            <p className="text-xs text-ink-soft mt-4">💡 Ganti nama tidak menghapus poin & riwayat. Hapus anak akan menghapus semua poin & riwayatnya (hati-hati!).</p>
           </div>
         )}
 
